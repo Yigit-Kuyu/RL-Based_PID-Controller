@@ -3,11 +3,7 @@ import matplotlib.pyplot as plt
 
 
 class StanleyController:
-    """
-    Path tracking controller using Stanley controller for lateral control and simple proportional
-    controller for lateral longitudinal control.
-    See: https://ieeexplore.ieee.org/document/4282788
-    """
+
 
     def __init__(self, path_ref, v_ref, params):
         self.path_ref = path_ref
@@ -31,8 +27,6 @@ class StanleyController:
         path_point_nearest = self.path_ref[id_nearest]  # [x, y, yaw] of nearest path point
 
         # Yaw error term
-        # TODO: Normalize angles correctly
-        # See: https://stackoverflow.com/a/32266181
         yaw_error = path_point_nearest[2] - yaw 
 
         # Cross-track error to nearest point on path
