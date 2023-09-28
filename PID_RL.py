@@ -1,6 +1,77 @@
 import numpy as np
 import matplotlib.pyplot as plt
 
+def calculate_curvature(path, x):
+  """Calculates the curvature of a reference path at a given x-position.
+
+  Args:
+    path: A reference path.
+    x: The x-position of the vehicle.
+
+  Returns:
+    The curvature of the reference path at the given x-position.
+  """
+
+  # Calculate the derivatives of the reference path
+  dx = np.diff(path[:, 0])
+  dy = np.diff(path[:, 1])
+
+  # Calculate the curvature of the reference path
+  curvature = (dy / dx) / (1.0 + (dy / dx)**2)
+
+  # Return the curvature at the given x-position
+  return curvature[x]
+
+
+def calculate_direction(path, x):
+  """Calculates the direction of a reference path at a given x-position.
+
+  Args:
+    path: A reference path.
+    x: The x-position of the vehicle.
+
+  Returns:
+    The direction of the reference path at the given x-position.
+  """
+
+  # Calculate the derivatives of the reference path
+  dx = np.diff(path[:, 0])
+  dy = np.diff(path[:, 1])
+
+  # Calculate the direction of the reference path
+  direction = np.arctan2(dy, dx)[x]
+
+  # Return the direction
+  return direction
+
+
+def determine_signs_of_cos_and_sin(curvature, direction):
+  """Determines the signs of cos and sin in the vehicle normal based on the curvature and direction of the reference path.
+
+  Args:
+    curvature: The curvature of the reference path.
+    direction: The direction of the reference path.
+
+  Returns:
+    A tuple containing the signs of cos and sin in the vehicle normal.
+  """
+
+  if curvature > 0:
+    sign_of_cos = 1
+    sign_of_sin = -1
+  else:
+    sign_of_cos = -1
+    sign_of_sin = 1
+
+  if direction > np.pi / 2:
+    sign_of_cos *= -1
+    sign_of_sin *= -1
+
+  return sign_of_cos, sign_of_sin
+
+
+
+
 
 class StanleyController:
     """
@@ -35,16 +106,30 @@ class StanleyController:
         path_point_nearest = self.path_ref[id_nearest]  # [x, y, yaw] of nearest path point
 
         # Yaw error term
-        # TODO: Normalize angles correctly
-        # See: https://stackoverflow.com/a/32266181
-        yaw_error = np.mod(path_point_nearest[2],2.0*np.pi) - yaw 
+        #yaw_error = np.mod(path_point_nearest[2],2.0*np.pi) - yaw 
+        yaw_error = path_point_nearest[2] - yaw 
+
 
         # Cross-track error to nearest point on path
         e_ct = np.sqrt(dists[id_nearest])
 
+        #curvature_x=calculate_curvature(self.path_ref[:, :2], id_nearest)
+        #direction_x =calculate_direction(self.path_ref[:, :2], id_nearest)
+        #sign_of_cos, sign_of_sin=determine_signs_of_cos_and_sin(curvature_x, direction_x)
+
+         # Determine the signs of sin and cos in the vehicle normal.
+        if yaw_error > 0:
+            sign_of_sin = 1
+            sign_of_cos = -1
+        else:
+            sign_of_sin = -1
+            sign_of_cos = 1
+
+
+
         # Cross-track error term has to be negative if we are on left side
         # of path and positive if we are on right side of path
-        vehicle_normal = np.array([np.sin(yaw), -np.cos(yaw)])
+        vehicle_normal = np.array([sign_of_cos * np.cos(yaw), sign_of_sin * np.sin(yaw)]) # perpendicular to the bicycle's direction of travel
         nearest_p_to_front_wheel = pos_fa - path_point_nearest[:2]
         dir_ct = np.sign(np.dot(vehicle_normal, nearest_p_to_front_wheel))
 
@@ -52,7 +137,7 @@ class StanleyController:
         #steering_angle = yaw_error + dir_ct * np.arctan2(self.k * e_ct, (v + self.k_soft))
         steering_angle = yaw_error + dir_ct * np.arctan2(self.k * e_ct, v)
         
-        
+        print('steering angle: ', steering_angle)
         return steering_angle
 
     def acceleration(self, state):
@@ -92,7 +177,7 @@ class BicycleModel1WS:
         x=state[0]
         y=state[1]
         a, delta = inputs
-        delta = np.clip(delta, -self.delta_max, self.delta_max)
+        delta = np.clip(delta, -self.delta_max, self.delta_max) # steerinng angle
 
         dx = v * np.cos(yaw)*dt
         dy = v * np.sin(yaw)*dt
@@ -139,7 +224,7 @@ def simulate():
 
     # Controller input
     path_ref = path_sin()
-    v_ref = 0.2
+    v_ref = 2
 
     # Bicycle model
     wheelbase = 2
@@ -150,7 +235,7 @@ def simulate():
     params = {"wheelbase": wheelbase,
               "k": 0.5, # control gain
               "k_soft": 2,
-              "k_p": 0.2}
+              "k_p": 1.5}
     controller = StanleyController(path_ref, v_ref, params)
 
     # Initialize histories for time, state and inputs
@@ -159,7 +244,7 @@ def simulate():
     inputs_hist = []
 
     # Initial state and input
-    state = np.array([0, 0, np.radians(0), 0.0]) #x,y, steering, velocity
+    state = np.array([0, 0, np.radians(0), 10.0]) #x,y, steering, velocity
     inputs = controller.compute_controls(state)
     
 
@@ -176,7 +261,7 @@ def simulate():
         #t_span = (t, t + dt)
         #t_eval = np.linspace(*t_span, 5)
 
-        if it==100000:
+        if it==30000:
             print('Dur')
             break
 
@@ -212,8 +297,8 @@ def plot_trajectory(state, path_ref, L):
     x, y, yaw = state[:3]
     fig, ax = plt.subplots(1, 1, figsize=(8, 8)) 
     ax.plot(x, y, 'k', label="rear wheel")
-    ax.plot(x + L * np.cos(yaw), y + L * np.sin(yaw), 'k-.', label="front wheel")
-    ax.plot(path_ref[:, 0], path_ref[:, 1], 'r--', label="path ref")
+    #ax.plot(x + L * np.cos(yaw), y + L * np.sin(yaw), 'k-.', label="front wheel")
+    #ax.plot(path_ref[:, 0], path_ref[:, 1], 'r--', label="path ref")
     ax.legend()
     ax.axis('equal')
     ax.grid()
