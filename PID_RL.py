@@ -3,7 +3,11 @@ import matplotlib.pyplot as plt
 
 
 class StanleyController:
-
+    """
+    Path tracking controller using Stanley controller for lateral control and simple proportional
+    controller for lateral longitudinal control.
+    See: https://ieeexplore.ieee.org/document/4282788
+    """
 
     def __init__(self, path_ref, v_ref, params):
         self.path_ref = path_ref
@@ -17,17 +21,23 @@ class StanleyController:
         """
         Calculate control action for steering angle.
         """
+   
         pos = state[:2]
         yaw, v = state[2:4]
-        pos_fw = pos + self.wheelbase * np.array([np.cos(yaw), np.sin(yaw)])  # Position front wheel
+        # fx = x + L * np.cos(state.yaw)
+        # fy =y + L * np.sin(state.yaw)
+        pos_fa = pos + self.wheelbase * np.array([np.cos(yaw), np.sin(yaw)])  # Position front axle
 
         # Find point on path nearest to front wheel
-        dists = np.sum((pos_fw - self.path_ref[:, :2])**2, axis=1)
+        dists = np.sum((pos_fa - self.path_ref[:, :2])**2, axis=1)
+        # Search nearest point index
         id_nearest = np.argmin(dists)
         path_point_nearest = self.path_ref[id_nearest]  # [x, y, yaw] of nearest path point
 
         # Yaw error term
-        yaw_error = path_point_nearest[2] - yaw 
+        # TODO: Normalize angles correctly
+        # See: https://stackoverflow.com/a/32266181
+        yaw_error = np.mod(path_point_nearest[2],2.0*np.pi) - yaw 
 
         # Cross-track error to nearest point on path
         e_ct = np.sqrt(dists[id_nearest])
@@ -35,13 +45,13 @@ class StanleyController:
         # Cross-track error term has to be negative if we are on left side
         # of path and positive if we are on right side of path
         vehicle_normal = np.array([np.sin(yaw), -np.cos(yaw)])
-        nearest_p_to_front_wheel = pos_fw - path_point_nearest[:2]
+        nearest_p_to_front_wheel = pos_fa - path_point_nearest[:2]
         dir_ct = np.sign(np.dot(vehicle_normal, nearest_p_to_front_wheel))
 
         # Final steering angle output
         #steering_angle = yaw_error + dir_ct * np.arctan2(self.k * e_ct, (v + self.k_soft))
-        #steering_angle = yaw_error + dir_ct * self.k * e_ct
-        steering_angle =  dir_ct * 0.002 * e_ct
+        steering_angle = yaw_error + dir_ct * np.arctan2(self.k * e_ct, v)
+        
         
         return steering_angle
 
@@ -89,10 +99,14 @@ class BicycleModel1WS:
 
         x_new=x+dx
         y_new=y+dx
+
         
         yaw_new = v / self.L * np.tan(delta)*dt
-        yaw_new=yaw_new+yaw
-        #yaw_new = np.mod(yaw_new,2.0*np.pi) # Wrap theta at 2pi
+        #yaw_new=yaw_new+yaw
+        yaw_new = np.mod(yaw_new,2.0*np.pi) # Normalize yaw at 2pi
+
+        #rear_x=x_new-((self.L / 2) * np.cos(yaw_new))
+        #rear_y=y_new-((self.L / 2) * np.sin(yaw_new))
         
         v_new = a*dt
 
@@ -101,36 +115,6 @@ class BicycleModel1WS:
         
         
         return state_new
-
-
-class BicycleModel2WS:
-    """
-    Class representing bicycle model with front and back wheel steering.
-    """
-
-    def __init__(self, delta_max=np.radians(10), L=2):
-        self.delta_max = delta_max # [rad] max steering angle
-        self.L = L # [m] Wheel base of vehicle
-
-    def kinematics(self, t, state, inputs):
-        """
-        Kinematic model for Scipy's solve_ivp function.
-        Note that the position [x, y] and velocity v of the bicycle correspond 
-        to the position and velocity of the rear wheel.
-        :param t: continuous time
-        :param state: [x, y, yaw, v] state
-        :param inputs: [a, delta] input
-        """
-        yaw, v = state[2:4]
-        a, delta = inputs
-        delta = np.clip(delta, -self.delta_max, self.delta_max)
-
-        x_dot = v * np.cos(yaw - delta)
-        y_dot = v * np.sin(yaw - delta)
-        yaw_dot = 2 * v / self.L * np.sin(delta)
-        v_dot = a
-
-        return np.array([x_dot, y_dot, yaw_dot, v_dot])
 
 
 
@@ -164,7 +148,7 @@ def simulate():
 
     # Controller
     params = {"wheelbase": wheelbase,
-              "k": 0.02,
+              "k": 0.5, # control gain
               "k_soft": 2,
               "k_p": 0.2}
     controller = StanleyController(path_ref, v_ref, params)
@@ -175,8 +159,9 @@ def simulate():
     inputs_hist = []
 
     # Initial state and input
-    state = np.array([-4.0, -2.0, np.radians(-90), 0.0]) #x,y, steering, velocity
+    state = np.array([0, 0, np.radians(0), 0.0]) #x,y, steering, velocity
     inputs = controller.compute_controls(state)
+    
 
     # Simulate
     #for t in t_vec:
