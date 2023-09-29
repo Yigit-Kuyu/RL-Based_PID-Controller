@@ -107,7 +107,8 @@ class StanleyController:
 
         # Yaw error term
         #yaw_error = np.mod(path_point_nearest[2],2.0*np.pi) - yaw 
-        yaw_error = path_point_nearest[2] - yaw 
+        yaw_error = path_point_nearest[2] - yaw #yaw_ref- yaw_car
+        yaw_error = np.mod(yaw_error,2.0*np.pi)
 
 
         # Cross-track error to nearest point on path
@@ -118,24 +119,32 @@ class StanleyController:
         #sign_of_cos, sign_of_sin=determine_signs_of_cos_and_sin(curvature_x, direction_x)
 
          # Determine the signs of sin and cos in the vehicle normal.
+        '''
         if yaw_error > 0:
             sign_of_sin = 1
             sign_of_cos = -1
         else:
             sign_of_sin = -1
             sign_of_cos = 1
+        '''
+
+        if yaw_error > 0:
+            e_ct=abs(e_ct)
+        else:
+            e_ct=abs(e_ct)
+            
 
 
 
         # Cross-track error term has to be negative if we are on left side
         # of path and positive if we are on right side of path
-        vehicle_normal = np.array([sign_of_cos * np.cos(yaw), sign_of_sin * np.sin(yaw)]) # perpendicular to the bicycle's direction of travel
-        nearest_p_to_front_wheel = pos_fa - path_point_nearest[:2]
-        dir_ct = np.sign(np.dot(vehicle_normal, nearest_p_to_front_wheel))
+        #vehicle_normal = np.array([sign_of_cos * np.cos(yaw), sign_of_sin * np.sin(yaw)]) # perpendicular to the bicycle's direction of travel
+        #nearest_p_to_front_wheel = pos_fa - path_point_nearest[:2]
+        #dir_ct = np.sign(np.dot(vehicle_normal, nearest_p_to_front_wheel))
 
         # Final steering angle output
         #steering_angle = yaw_error + dir_ct * np.arctan2(self.k * e_ct, (v + self.k_soft))
-        steering_angle = yaw_error + dir_ct * np.arctan2(self.k * e_ct, v)
+        steering_angle = yaw_error + np.arctan2(self.k * e_ct, v)
         
         print('steering angle: ', steering_angle)
         return steering_angle
@@ -235,7 +244,7 @@ def simulate():
     params = {"wheelbase": wheelbase,
               "k": 0.5, # control gain
               "k_soft": 2,
-              "k_p": 1.5}
+              "k_p": 1}
     controller = StanleyController(path_ref, v_ref, params)
 
     # Initialize histories for time, state and inputs
@@ -261,7 +270,7 @@ def simulate():
         #t_span = (t, t + dt)
         #t_eval = np.linspace(*t_span, 5)
 
-        if it==30000:
+        if it==10000:
             print('Dur')
             break
 
