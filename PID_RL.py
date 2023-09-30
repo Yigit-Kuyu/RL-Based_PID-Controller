@@ -143,11 +143,13 @@ class StanleyController:
         dists = np.sum((pos_fa - self.path_ref[:, :2])**2, axis=1)
         # Search nearest point index
         id_nearest = np.argmin(dists)
-        path_point_nearest = self.path_ref[id_nearest]  # [x, y, yaw] of nearest path point
+        #path_point_nearest = self.path_ref[id_nearest]  # [x, y, yaw] of nearest path point
+        path_point_nearest = self.path_ref[current_target_indx]
+
 
         nearest_p_to_front_wheel = pos_fa - path_point_nearest[:2]
         
-        front_axle_vec_rot_90 = np.array([-np.cos(yaw - np.pi / 2.0),-np.sin(yaw - np.pi / 2.0)])
+        front_axle_vec_rot_90 = [-np.cos(yaw + np.pi / 2.0),-np.sin(yaw + np.pi / 2.0)]
 
         error_front_axle_notused=np.dot([dx[current_target_indx], dy[current_target_indx]], front_axle_vec_rot_90)
        
@@ -159,8 +161,8 @@ class StanleyController:
         # Yaw error term
         #yaw_error = np.mod(path_point_nearest[2],2.0*np.pi) - yaw 
         yaw_error = path_point_nearest[2] - yaw #yaw_ref- yaw_car
-        yaw_error = np.mod(yaw_error,2.0*np.pi)
-        #yaw_new=normalize_angle(yaw_error)
+        #yaw_error = np.mod(yaw_error,2.0*np.pi)
+        yaw_error=normalize_angle(yaw_error)
 
 
         # Cross-track error to nearest point on path
@@ -235,17 +237,19 @@ class BicycleModel1WS:
         dy = v * np.sin(yaw)*dt
 
         x_new=x+dx
-        y_new=y+dx
+        y_new=y+dy
 
         
         yaw_new = v / self.L * np.tan(delta)*dt
-        yaw_new = np.mod(yaw_new,2.0*np.pi) # Normalize yaw at 2pi
-        #yaw_new=normalize_angle(yaw_new)
+        #yaw_new = np.mod(yaw_new,2.0*np.pi) # Normalize yaw at 2pi
+        yaw_new=yaw+yaw_new
+        yaw_new=normalize_angle(yaw_new)
 
         #rear_x=x_new-((self.L / 2) * np.cos(yaw_new))
         #rear_y=y_new-((self.L / 2) * np.sin(yaw_new))
         
         v_new = a*dt
+        v_new=v+v_new
 
         state_new=[x_new, y_new, yaw_new, v_new]
 
@@ -292,7 +296,7 @@ def simulate():
 
     # Bicycle model
     wheelbase = 2
-    delta_max = np.radians(30)
+    delta_max = np.radians(30) # [rad] max steering angle
     model = BicycleModel1WS(delta_max, wheelbase)
 
     # Controller
@@ -309,7 +313,7 @@ def simulate():
     target_index=0
 
     # Initial state and input
-    state = np.array([0, 0, np.radians(20), 0.0]) #x,y, steering, velocity
+    state = np.array([0, 0, np.radians(50), 0.0]) #x,y, steering, velocity
     inputs = controller.compute_controls(state,target_index)
     
 
@@ -317,6 +321,7 @@ def simulate():
     #for t in t_vec:
     it=0
     target_index=0
+    last_idx=len(path_ref)-1
     while True:
         state_hist.append(state)
         print('iteration: ', it)
@@ -327,13 +332,18 @@ def simulate():
         #t_span = (t, t + dt)
         #t_eval = np.linspace(*t_span, 5)
 
-        if it==1000:
-            print('Dur')
-            break
+        
+        inputs = controller.compute_controls(state_new,inputs[2]) #v, steering angle, target index
+        state=state_new
 
         
-        inputs = controller.compute_controls(state_new,inputs[2])
-        state=state_new
+        if it>1000:
+            print('Dur')
+            #break
+        
+        if last_idx <= inputs[2]:
+            print('Dur')
+            break
 
         # Store state, inputs and time for analysis
         inputs_hist.append(inputs)
@@ -345,7 +355,7 @@ def simulate():
             break
 
     #state_hist = np.concatenate(state_hist, axis=1)
-    inputs_hist = np.vstack(inputs_hist).T
+    #inputs_hist = np.vstack(inputs_hist).T
     #t_hist = np.concatenate(t_hist)
 
     plot_trajectory(state_hist, path_ref, wheelbase)
