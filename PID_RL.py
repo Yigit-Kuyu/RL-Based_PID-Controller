@@ -88,7 +88,7 @@ class StanleyController:
         self.k_soft = params["k_soft"]
         self.k_p = params["k_p"]
 
-    def steering_angle(self, state):
+    def steering_angle(self, state,last_target_indx):
         """
         Calculate control action for steering angle.
         """
@@ -133,8 +133,10 @@ class StanleyController:
         dx = [fx - icx for icx in self.path_ref[:,0]]
         dy = [fy - icy for icy in self.path_ref[:,1]]
         d = np.hypot(dx, dy)
-        target_idx = np.argmin(d)
-
+        current_target_indx = np.argmin(d)
+        
+        if last_target_indx >= current_target_indx:
+            current_target_indx = last_target_indx
        
         
         # Find point on path nearest to front wheel
@@ -147,8 +149,8 @@ class StanleyController:
         
         front_axle_vec_rot_90 = np.array([-np.cos(yaw - np.pi / 2.0),-np.sin(yaw - np.pi / 2.0)])
 
-        error_front_axle_notused=np.dot([dx[target_idx], dy[target_idx]], front_axle_vec_rot_90)
-        
+        error_front_axle_notused=np.dot([dx[current_target_indx], dy[current_target_indx]], front_axle_vec_rot_90)
+       
         error_front_axle = np.dot(nearest_p_to_front_wheel, front_axle_vec_rot_90)
         
        
@@ -180,10 +182,10 @@ class StanleyController:
         #steering_angle = yaw_error + dir_ct * np.arctan2(self.k * e_ct, (v + self.k_soft))
         #steering_angle = yaw_error + dir_ct * np.arctan2(self.k * e_ct, (v + self.k_soft))
         #steering_angle = yaw_error + np.arctan2(self.k * error_veh_normal, v)
-        steering_angle = yaw_error + np.arctan2(self.k * error_front_axle, v)
+        steering_angle = yaw_error + np.arctan2(self.k * error_front_axle_notused,v)
         
         print('steering angle: ', steering_angle)
-        return steering_angle
+        return steering_angle, current_target_indx
 
         
 
@@ -196,8 +198,11 @@ class StanleyController:
 
         return acceleration
 
-    def compute_controls(self, state):
-        return [self.acceleration(state), self.steering_angle(state)]
+    def compute_controls(self, state, target_indx):
+        v= self.acceleration(state)
+        str_ang, target_index=self.steering_angle(state, target_indx)
+        
+        return [v, str_ang, target_index]
 
 
 
@@ -207,7 +212,7 @@ class BicycleModel1WS:
     Class representing bicycle model with front wheel steering.
     """
 
-    def __init__(self, delta_max=np.radians(90), L=2):
+    def __init__(self, delta_max=np.radians(30), L=2):
         self.delta_max = delta_max # [rad] max steering angle
         self.L = L # [m] Wheel base of vehicle
 
@@ -223,7 +228,7 @@ class BicycleModel1WS:
         yaw, v = state[2:4]
         x=state[0]
         y=state[1]
-        a, delta = inputs
+        a, delta, target_index = inputs
         delta = np.clip(delta, -self.delta_max, self.delta_max) # steering angle
 
         dx = v * np.cos(yaw)*dt
@@ -283,10 +288,10 @@ def simulate():
 
     # Controller input
     path_ref = path_sin()
-    v_ref = 30
+    v_ref = 30.0 / 3.6 # [m/s]
 
     # Bicycle model
-    wheelbase = 3
+    wheelbase = 2
     delta_max = np.radians(30)
     model = BicycleModel1WS(delta_max, wheelbase)
 
@@ -301,15 +306,17 @@ def simulate():
     t_hist = []
     state_hist = []
     inputs_hist = []
+    target_index=0
 
     # Initial state and input
-    state = np.array([0, 0, np.radians(0), 10.0]) #x,y, steering, velocity
-    inputs = controller.compute_controls(state)
+    state = np.array([0, 0, np.radians(20), 0.0]) #x,y, steering, velocity
+    inputs = controller.compute_controls(state,target_index)
     
 
     # Simulate
     #for t in t_vec:
     it=0
+    target_index=0
     while True:
         state_hist.append(state)
         print('iteration: ', it)
@@ -322,9 +329,10 @@ def simulate():
 
         if it==1000:
             print('Dur')
-            #break
+            break
 
-        inputs = controller.compute_controls(state_new)
+        
+        inputs = controller.compute_controls(state_new,inputs[2])
         state=state_new
 
         # Store state, inputs and time for analysis
