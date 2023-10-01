@@ -71,14 +71,8 @@ def determine_signs_of_cos_and_sin(curvature, direction):
 
 
 
-
-
 class StanleyController:
-    """
-    Path tracking controller using Stanley controller for lateral control and simple proportional
-    controller for lateral longitudinal control.
-    See: https://ieeexplore.ieee.org/document/4282788
-    """
+
 
     def __init__(self, path_ref, v_ref, params):
         self.path_ref = path_ref
@@ -89,102 +83,42 @@ class StanleyController:
         self.k_p = params["k_p"]
 
     def steering_angle(self, state,last_target_indx):
-        """
-        Calculate control action for steering angle.
-        """
-        
-        '''
+        calculation_option=1 # both options give same result
+      
         pos = state[:2]
         yaw, v = state[2:4]
-        pos_fw = pos + self.wheelbase * np.array([np.cos(yaw), np.sin(yaw)])  # Position front wheel
-
-        # Find point on path nearest to front wheel
-        dists = np.sum((pos_fw - self.path_ref[:, :2])**2, axis=1)
-        id_nearest = np.argmin(dists)
-        path_point_nearest = self.path_ref[id_nearest]  # [x, y, yaw] of nearest path point
-
-        # Yaw error term
-        # TODO: Normalize angles correctly
-        # See: https://stackoverflow.com/a/32266181
-        yaw_error = path_point_nearest[2] - yaw 
-
-        # Cross-track error to nearest point on path
-        e_ct = np.sqrt(dists[id_nearest])
-
-        # Cross-track error term has to be negative if we are on left side
-        # of path and positive if we are on right side of path
-        vehicle_normal = np.array([np.sin(yaw), -np.cos(yaw)])
-        nearest_p_to_front_wheel = pos_fw - path_point_nearest[:2]
-        dir_ct = np.sign(np.dot(vehicle_normal, nearest_p_to_front_wheel))
-
-        # Final steering angle output
-        steering_angle = yaw_error + dir_ct * np.arctan2(self.k * e_ct, (v + self.k_soft))
-
-        return steering_angle
-
-        '''
-
-        pos = state[:2]
-        yaw, v = state[2:4]
-        fx = pos[0] + self.wheelbase * np.cos(yaw) # front x
-        fy =pos[1] + self.wheelbase * np.sin(yaw)  # front y
+        #fx = pos[0] + self.wheelbase * np.cos(yaw) # front x
+        #fy =pos[1] + self.wheelbase * np.sin(yaw)  # front y
         pos_fa = pos + self.wheelbase * np.array([np.cos(yaw), np.sin(yaw)])  # Position front axle
 
-        dx = [fx - icx for icx in self.path_ref[:,0]]
-        dy = [fy - icy for icy in self.path_ref[:,1]]
-        d = np.hypot(dx, dy)
-        current_target_indx = np.argmin(d)
+        # Find point on path nearest to front wheel
+        dists = np.sum((pos_fa - self.path_ref[:, :2])**2, axis=1)
+        # Search nearest point index
+        current_target_indx = np.argmin(dists)
         
         if last_target_indx >= current_target_indx:
             current_target_indx = last_target_indx
        
         
-        # Find point on path nearest to front wheel
-        dists = np.sum((pos_fa - self.path_ref[:, :2])**2, axis=1)
-        # Search nearest point index
-        id_nearest = np.argmin(dists)
-        #path_point_nearest = self.path_ref[id_nearest]  # [x, y, yaw] of nearest path point
-        path_point_nearest = self.path_ref[current_target_indx]
-
-
-        nearest_p_to_front_wheel = pos_fa - path_point_nearest[:2]
-        
-        front_axle_vec_rot_90 = [-np.cos(yaw + np.pi / 2.0),-np.sin(yaw + np.pi / 2.0)]
-
-        error_front_axle_notused=np.dot([dx[current_target_indx], dy[current_target_indx]], front_axle_vec_rot_90)
-       
-        error_front_axle = np.dot(nearest_p_to_front_wheel, front_axle_vec_rot_90)
-        
-       
-        
+        path_point_nearest = self.path_ref[current_target_indx]  # [x, y, yaw] of nearest path point
 
         # Yaw error term
-        #yaw_error = np.mod(path_point_nearest[2],2.0*np.pi) - yaw 
         yaw_error = path_point_nearest[2] - yaw #yaw_ref- yaw_car
         #yaw_error = np.mod(yaw_error,2.0*np.pi)
         yaw_error=normalize_angle(yaw_error)
 
-
-        # Cross-track error to nearest point on path
-        e_ct = np.sqrt(dists[id_nearest])
-
-        #curvature_x=calculate_curvature(self.path_ref[:, :2], id_nearest)
-        #direction_x =calculate_direction(self.path_ref[:, :2], id_nearest)
-        #sign_of_cos, sign_of_sin=determine_signs_of_cos_and_sin(curvature_x, direction_x)
-
-      
-
-        # Cross-track error term has to be negative if we are on left side
-        # of path and positive if we are on right side of path
-        #vehicle_normal = np.array([sign_of_cos * np.cos(yaw), sign_of_sin * np.sin(yaw)]) # perpendicular to the bicycle's direction of travel
-        #error_veh_normal=np.dot(vehicle_normal, nearest_p_to_front_wheel)
-        #dir_ct = np.sign(np.dot(vehicle_normal, nearest_p_to_front_wheel))
-
-        # Final steering angle output
-        #steering_angle = yaw_error + dir_ct * np.arctan2(self.k * e_ct, (v + self.k_soft))
-        #steering_angle = yaw_error + dir_ct * np.arctan2(self.k * e_ct, (v + self.k_soft))
-        #steering_angle = yaw_error + np.arctan2(self.k * error_veh_normal, v)
-        steering_angle = yaw_error + np.arctan2(self.k * error_front_axle_notused,v)
+        if calculation_option==1: # main option
+            # Cross-track error to nearest point on path
+            e_ct = np.sqrt(dists[current_target_indx])
+            # Calculate steering angle
+            steering_angle = yaw_error + np.arctan2(self.k * e_ct,v)
+        else: # alternative option
+            # second option for error calculation
+            nearest_p_to_front_wheel = pos_fa - path_point_nearest[:2]  
+            front_axle_vec_rot_90 = [-np.cos(yaw + np.pi / 2.0),-np.sin(yaw + np.pi / 2.0)]
+            error_front_axle = np.dot(nearest_p_to_front_wheel, front_axle_vec_rot_90)
+            # second option for calculation steering angle
+            steering_angle = yaw_error + np.arctan2(self.k * error_front_axle,v)
         
         print('steering angle: ', steering_angle)
         return steering_angle, current_target_indx
@@ -269,9 +203,6 @@ def normalize_angle(angle):
     return angle
 
 
-
-
-
 def path_sin():
     """Generate sinusoidal path along global y axis."""
     s = np.linspace(0, 4 * np.pi, 1000)
@@ -285,7 +216,7 @@ def path_sin():
     return path
 
 def simulate():
-    dt = 0.1  # sampling time, 0.5
+    dt = 0.1  # sampling time
     t_max = 1000  # Max simulation time
     n_steps = int(t_max / dt)
     t_vec = np.linspace(0, t_max, n_steps)
@@ -307,21 +238,19 @@ def simulate():
     controller = StanleyController(path_ref, v_ref, params)
 
     # Initialize histories for time, state and inputs
-    t_hist = []
+   
     state_hist = []
     inputs_hist = []
     target_index=0
+    
 
     # Initial state and input
     state = np.array([0, 0, np.radians(50), 0.0]) #x,y, steering, velocity
     inputs = controller.compute_controls(state,target_index)
     
-
-    # Simulate
-    #for t in t_vec:
     it=0
-    target_index=0
     last_idx=len(path_ref)-1
+    animate=1
     while True:
         state_hist.append(state)
         print('iteration: ', it)
@@ -329,51 +258,43 @@ def simulate():
         it+=1
         state_new = model.kinematics(state, inputs, dt)
         
-        #t_span = (t, t + dt)
-        #t_eval = np.linspace(*t_span, 5)
-
-        
         inputs = controller.compute_controls(state_new,inputs[2]) #v, steering angle, target index
         state=state_new
 
-        
-        if it>1000:
-            print('Dur')
-            #break
-        
+
         if last_idx <= inputs[2]:
-            print('Dur')
+            print('stop')
             break
-
-        # Store state, inputs and time for analysis
-        inputs_hist.append(inputs)
-        #t_hist.append(sol.t)
 
         
-        if reached_target(state, path_ref[-1, :2], wheelbase):
-            print("Reached end of path.")
-            break
+        inputs_hist.append(inputs)
+        
 
-    #state_hist = np.concatenate(state_hist, axis=1)
-    #inputs_hist = np.vstack(inputs_hist).T
-    #t_hist = np.concatenate(t_hist)
+        
+        if animate:
+            x=[s[0] for s in state_hist]
+            y=[s[1] for s in state_hist]
+            plt.cla()
+            # for stopping simulation with the esc key.
+            plt.gcf().canvas.mpl_connect('key_release_event',
+                    lambda event: [exit(0) if event.key == 'escape' else None])
+            plt.plot(path_ref[:, 0], path_ref[:, 1], ".r", label="reference")
+            plt.plot(x, y, "-b", label="found traj")
+            plt.plot(path_ref[last_idx,0], path_ref[last_idx,1], "xg", label="target")
+            plt.axis("equal")
+            plt.grid(True)
+            plt.title("Speed[km/h]:" + str(state_new[-1] * 3.6)[:4])
+            plt.pause(0.001)
 
     plot_trajectory(state_hist, path_ref, wheelbase)
-    # plot_state(t_hist, state_hist, v_ref=v_ref)
+    
 
-def reached_target(state, target, wheelbase):
-    pos = state[:2]
-    yaw = state[2]
-    pos_fw = pos + wheelbase * np.array([np.cos(yaw), np.sin(yaw)])  # Position front wheel
-    dist_to_target = np.sqrt(np.sum((pos_fw - target)**2))
 
-    return dist_to_target < 0.05
 
 def plot_trajectory(state, path_ref, L):
     x=[s[0] for s in state]
     y=[s[1] for s in state]
     yaw=[s[2] for s in state]
-    #x, y, yaw = state[:,:3]
     fig, ax = plt.subplots(1, 1, figsize=(8, 8)) 
     ax.plot(x, y, 'k', label="rear wheel")
     ax.plot(x + L * np.cos(yaw), y + L * np.sin(yaw), 'k-.', label="front wheel")
@@ -386,32 +307,6 @@ def plot_trajectory(state, path_ref, L):
 
     return fig
 
-def plot_state(t, state, x_ref=None, y_ref=None, v_ref=None):
-    fig, axs = plt.subplots(1, 4, figsize=(15, 5)) 
-    axs[0].plot(t, state[0], 'k')
-    axs[0].grid()
-    axs[0].set_xlabel('t [s]')
-    axs[0].set_ylabel('x [m]')
-
-    axs[1].plot(t, state[1], 'k')
-    axs[1].grid()
-    axs[1].set_xlabel('t [s]')
-    axs[1].set_ylabel('y [m/s]')
-
-    axs[2].plot(t, np.rad2deg(state[2]) % (360), 'k')
-    axs[2].grid()
-    axs[2].set_xlabel('t [s]')
-    axs[2].set_ylabel('yaw [deg]')
-
-    v_ref_vec = v_ref * np.ones_like(t)
-    axs[3].plot(t, state[3], 'k')
-    axs[3].plot(t, v_ref_vec, 'r--')
-    axs[3].grid()
-    axs[3].set_xlabel('t [s]')
-    axs[3].set_ylabel('speed [m/s]')
-
-    fig.tight_layout()
-    return fig
 
 
 if __name__ == "__main__":
