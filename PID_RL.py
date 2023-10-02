@@ -136,7 +136,7 @@ class StanleyController:
     def PID(self, state,dt,errors): # PID for acceleration
         
         v = state[3]
-        #p=(self.v_ref - v) * self.k_p
+        #p=(self.v_ref - v) * self.k_p # kp=1
         p=self.k_p*errors[1]
         i=self.k_i*sum(errors)*dt
         d=self.k_d*(errors[1]-errors[0])/dt
@@ -232,9 +232,9 @@ def simulate():
     # Initialization
     params = {"wheelbase": wheelbase,
               "k": 0.5, # control gain
-              "k_p": 1,
-              "k_i": 1e-4,
-              "k_d": 1e-4}
+              "k_p": 1e-6,
+              "k_i": 2e-6,
+              "k_d": 2e-2} # 2e-2
     controller = StanleyController(path_ref, v_ref, params)
 
     
@@ -249,7 +249,8 @@ def simulate():
     errors=[1e+6, 1e+6] # [previous error, current error]
     state = np.array([0, 0, np.radians(50), 0.0]) #x,y, steering, velocity,
     inputs = controller.calculate_vel_steer(state,target_index,dt,errors) #inputs: v, steering angle, target index, current error
-    errors[1]=inputs[-1]
+    #errors[1]=inputs[-1]
+    errors=[inputs[-1], inputs[-1]]
     
     it=0
     last_idx=len(path_ref)-1
