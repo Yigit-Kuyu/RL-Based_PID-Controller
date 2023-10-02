@@ -1,5 +1,6 @@
 import numpy as np
 import matplotlib.pyplot as plt
+import time
 
 def calculate_curvature(path, x):
   """Calculates the curvature of a reference path at a given x-position.
@@ -79,8 +80,9 @@ class StanleyController:
         self.v_ref = v_ref
         self.wheelbase = params["wheelbase"]
         self.k = params["k"]
-        self.k_soft = params["k_soft"]
         self.k_p = params["k_p"]
+        self.k_i = params["k_i"]
+        self.k_d = params["k_d"]
 
     def steering_angle(self, state,last_target_indx):
         calculation_option=1 # both options give same result
@@ -112,6 +114,10 @@ class StanleyController:
             e_ct = np.sqrt(dists[current_target_indx])
             # Calculate steering angle
             steering_angle = yaw_error + np.arctan2(self.k * e_ct,v)
+
+            print('steering angle: ', steering_angle)
+            return steering_angle, current_target_indx,e_ct
+        
         else: # alternative option
             # second option for error calculation
             nearest_p_to_front_wheel = pos_fa - path_point_nearest[:2]  
@@ -119,52 +125,45 @@ class StanleyController:
             error_front_axle = np.dot(nearest_p_to_front_wheel, front_axle_vec_rot_90)
             # second option for calculation steering angle
             steering_angle = yaw_error + np.arctan2(self.k * error_front_axle,v)
+            
+            print('steering angle: ', steering_angle)
+            return steering_angle, current_target_indx,error_front_axle 
         
-        print('steering angle: ', steering_angle)
-        return steering_angle, current_target_indx
+        
 
         
 
-    def acceleration(self, state):
-        """
-        Calculate control action for acceleration.
-        """
+    def PID(self, state,dt,errors): # PID for acceleration
+        
         v = state[3]
-        acceleration = (self.v_ref - v) * self.k_p
+        #p=(self.v_ref - v) * self.k_p
+        p=self.k_p*errors[1]
+        i=self.k_i*sum(errors)*dt
+        d=self.k_d*(errors[1]-errors[0])/dt
+        acceleration = p+i+d
 
         return acceleration
 
-    def compute_controls(self, state, target_indx):
-        v= self.acceleration(state)
-        str_ang, target_index=self.steering_angle(state, target_indx)
+    def calculate_vel_steer(self, state, target_indx,dt,errors):
+        v= self.PID(state,dt,errors)
+        str_ang, target_index, error=self.steering_angle(state, target_indx)
         
-        return [v, str_ang, target_index]
+        return [v, str_ang, target_index, error]
 
 
 
-# Note: Position of vehicle is defined as the position of the rear wheel
-class BicycleModel1WS:
-    """
-    Class representing bicycle model with front wheel steering.
-    """
+
+class BicycleModel_Rear: # Rear axle model (Position of vehicle is defined as the position of the rear wheel)
 
     def __init__(self, delta_max=np.radians(30), L=2):
         self.delta_max = delta_max # [rad] max steering angle
         self.L = L # [m] Wheel base of vehicle
 
     def kinematics(self, state, inputs, dt):
-        """
-        Kinematic model for Scipy's solve_ivp function.
-        Note that the position [x, y] and velocity v of the bicycle correspond 
-        to the position and velocity of the rear wheel.
-        :param t: continuous time
-        :param state: [x, y, yaw, v] state
-        :param inputs: [a, delta] input
-        """
         yaw, v = state[2:4]
         x=state[0]
         y=state[1]
-        a, delta, target_index = inputs
+        a, delta, target_index,  current_error= inputs
         delta = np.clip(delta, -self.delta_max, self.delta_max) # steering angle
 
         dx = v * np.cos(yaw)*dt
@@ -228,16 +227,17 @@ def simulate():
     # Bicycle model
     wheelbase = 2
     delta_max = np.radians(30) # [rad] max steering angle
-    model = BicycleModel1WS(delta_max, wheelbase)
+    model = BicycleModel_Rear(delta_max, wheelbase)
 
-    # Controller
+    # Initialization
     params = {"wheelbase": wheelbase,
               "k": 0.5, # control gain
-              "k_soft": 2,
-              "k_p": 1}
+              "k_p": 1,
+              "k_i": 1e-4,
+              "k_d": 1e-4}
     controller = StanleyController(path_ref, v_ref, params)
 
-    # Initialize histories for time, state and inputs
+    
    
     state_hist = []
     inputs_hist = []
@@ -245,22 +245,31 @@ def simulate():
     
 
     # Initial state and input
-    state = np.array([0, 0, np.radians(50), 0.0]) #x,y, steering, velocity
-    inputs = controller.compute_controls(state,target_index)
+    dt=1
+    errors=[1e+6, 1e+6] # [previous error, current error]
+    state = np.array([0, 0, np.radians(50), 0.0]) #x,y, steering, velocity,
+    inputs = controller.calculate_vel_steer(state,target_index,dt,errors) #inputs: v, steering angle, target index, current error
+    errors[1]=inputs[-1]
     
     it=0
     last_idx=len(path_ref)-1
     animate=1
+    timenow=time.time()
     while True:
+        time_previous=timenow
         state_hist.append(state)
         print('iteration: ', it)
         print('state.x: ', state[0], 'state.y: ', state[1])
         it+=1
         state_new = model.kinematics(state, inputs, dt)
-        
-        inputs = controller.compute_controls(state_new,inputs[2]) #v, steering angle, target index
+        timenow=time.time()
+        dt=timenow-time_previous # change in time
+        inputs = controller.calculate_vel_steer(state_new,inputs[2],dt,errors) #inputs: v, steering angle, target index, current error
+        errors[0]=errors[1]
+        errors[1]=inputs[-1]
         state=state_new
-
+        timestamps = np.arange(0, 3, 0.1)
+        
 
         if last_idx <= inputs[2]:
             print('stop')
