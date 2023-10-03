@@ -116,7 +116,7 @@ class StanleyController:
             steering_angle = yaw_error + np.arctan2(self.k * e_ct,v)
 
             print('steering angle: ', steering_angle)
-            return steering_angle, current_target_indx,e_ct
+            return steering_angle, current_target_indx
         
         else: # alternative option
             # second option for error calculation
@@ -127,28 +127,27 @@ class StanleyController:
             steering_angle = yaw_error + np.arctan2(self.k * error_front_axle,v)
             
             print('steering angle: ', steering_angle)
-            return steering_angle, current_target_indx,error_front_axle 
+            return steering_angle, current_target_indx 
         
         
 
+    def PID(self, state,dt,errors,total_errors): # PID for acceleration
         
-
-    def PID(self, state,dt,errors): # PID for acceleration
         
-        #v = state[3]
-        #p=(self.v_ref - v) * self.k_p # kp=1
         p=self.k_p*errors[1]
-        i=self.k_i*sum(errors)*dt
+        i=self.k_i*total_errors*dt
         d=self.k_d*(errors[1]-errors[0])/dt
+        print('PID P:', p, 'I: ',i, 'D: ',d)
         acceleration = p+i+d
 
         return acceleration
 
-    def calculate_vel_steer(self, state, target_indx,v, dt,errors):
-        v= self.PID(state,dt,errors)
-        str_ang, target_index, error=self.steering_angle(state, v, target_indx)
+    def calculate_vel_steer(self, state, target_indx,v, dt,errors,total_errors):
+        v= self.PID(state,dt,errors,total_errors)
+        velocity_error=self.v_ref - v
+        str_ang, target_index=self.steering_angle(state, v, target_indx)
         print('velocity: ', v)
-        return [v, str_ang, target_index, error]
+        return [v, str_ang, target_index, velocity_error]
 
 
 
@@ -241,9 +240,9 @@ def simulate():
      
     params = {"wheelbase": wheelbase,
               "k": 0.5, # control gain
-              "k_p": 1e-5,
-              "k_i": 1e-5,
-              "k_d": 0.05}
+              "k_p": 0.8,
+              "k_i": 2e-1,
+              "k_d": 1e-5}
     
     controller = StanleyController(path_ref, v_ref, params)
     
@@ -254,17 +253,19 @@ def simulate():
     
 
     # Initial state and input
-    dt=1 # For PID
+    dt=1  # For PID
+    total_velocity_errors=0
     v=0
-    errors=[1e+6, 1e+6] # [previous error, current error]
+    errors_velocity=[1e+1, 1e+1] # [previous velocity error, current velocity error]
     state = np.array([0, 0, np.radians(50)]) #state: x,y, yaw
-    inputs = controller.calculate_vel_steer(state,target_index,v, dt,errors) #inputs: velocity, steering angle, target index, current error
-    #errors[1]=inputs[-1]
-    errors=[inputs[-1], inputs[-1]]
+    inputs = controller.calculate_vel_steer(state,target_index,v, dt,errors_velocity,total_velocity_errors) #inputs: velocity, steering angle, target index, current velocity error
+    total_velocity_errors+=inputs[-1]
+    errors_velocity=[inputs[-1], inputs[-1]]
     
     it=0
     last_idx=len(path_ref)-1
     animate=1
+    
     timenow=time.time()
     while True:
         time_previous=timenow
@@ -275,9 +276,10 @@ def simulate():
         state_new = model.kinematics(state, inputs, dt_sampling)
         timenow=time.time()
         dt=timenow-time_previous # change in time
-        inputs = controller.calculate_vel_steer(state_new,inputs[2],inputs[0],dt,errors) #inputs: velocity, steering angle, target index, current error
-        errors[0]=errors[1]
-        errors[1]=inputs[-1]
+        inputs = controller.calculate_vel_steer(state_new,inputs[2],inputs[0],dt,errors_velocity,total_velocity_errors) #inputs: velocity, steering angle, target index, current velocity error
+        total_velocity_errors+=inputs[-1]
+        errors_velocity[0]=errors_velocity[1]
+        errors_velocity[1]=inputs[-1]
         state=state_new
         
         
@@ -303,7 +305,7 @@ def simulate():
             plt.plot(path_ref[last_idx,0], path_ref[last_idx,1], "xg", label="target")
             plt.axis("equal")
             plt.grid(True)
-            plt.title("Speed[km/h]:" + str(state_new[-1] * 3.6)[:4])
+            plt.title("Speed[km/h]:" + str(inputs[0] * 3.6)[:4])
             plt.pause(0.001)
 
     plot_trajectory(state_hist, path_ref, wheelbase)
