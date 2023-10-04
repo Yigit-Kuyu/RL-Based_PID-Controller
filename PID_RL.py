@@ -1,5 +1,3 @@
-from gym import make
-#import pybullet_envs
 import numpy as np
 import random
 import torch
@@ -10,7 +8,8 @@ import copy
 import time
 from collections import deque
 from torch.distributions.normal import Normal
-import matplotlib as plt
+#import matplotlib as plt
+import matplotlib.pyplot as plt
 
 
 
@@ -286,7 +285,7 @@ class BicycleModel_Rear: # Rear axle model (Position of vehicle is defined as th
         v=inputs[0]
         x=state[0]
         y=state[1]
-        a, delta, target_index,  current_error= inputs
+        a, delta, _,  _,_,_= inputs #inputs: velocity, steering angle, CTE, yaw error, target index, current velocity error
         delta = np.clip(delta, -self.delta_max, self.delta_max) # steering angle
 
         dx = v * np.cos(yaw)*dt
@@ -309,7 +308,7 @@ class BicycleModel_Rear: # Rear axle model (Position of vehicle is defined as th
 
         #v_new=v
 
-        state_new=[x_new, y_new, yaw_new, v_new]
+        state_new=[x_new, y_new, yaw_new]
 
         
         
@@ -401,10 +400,12 @@ class StanleyController:
 
     def PID(self, action,dt,errors,total_errors): # PID for acceleration
         
+        
         self.k_p=action[0]
         self.k_i=action[1]
         self.k_d=action[2]
-
+        
+        
         p=self.k_p*errors[1]
         i=self.k_i*total_errors*dt
         d=self.k_d*(errors[1]-errors[0])/dt
@@ -413,7 +414,7 @@ class StanleyController:
 
         return acceleration
 
-    def calculate_vel_steer(self, action, state, target_indx,v, dt,errors,total_errors):
+    def calculate_vel_steer(self, action, state, target_indx, dt,errors,total_errors):
         v= self.PID(action,dt,errors,total_errors)
         velocity_error=self.v_ref - v
         str_ang, target_index, e_ct, yaw_error=self.steering_angle(state, v, target_indx)
@@ -431,7 +432,7 @@ def reward_calculate(state_input):
         else:
             done=False
 
-            return R, done
+        return R, done
 
 def sac(episodes):
     agent = Sac_agent(state_size = state_size, action_size = action_size, hidden_dim = hidden_dim, high = high, low = low, 
@@ -463,12 +464,12 @@ def sac(episodes):
         # Initial state and input
         dt=1  # For PID
         total_velocity_errors=0
-        action=[1,1,1]
+        action=[1,1,1] # P, I, D
         v=0
         target_index=0
         errors_velocity=[1e+1, 1e+1] # [previous velocity error, current velocity error]
         state_control = np.array([0, 0, np.radians(50)]) #state_control: x,y, yaw
-        inputs = controller.calculate_vel_steer(action,state_control,target_index,v, dt,errors_velocity,total_velocity_errors) #inputs: velocity, steering angle, CTE, yaw error, target index, current velocity error
+        inputs = controller.calculate_vel_steer(action,state_control,target_index, dt,errors_velocity,total_velocity_errors) #inputs: velocity, steering angle, CTE, yaw error, target index, current velocity error
         state_RL=[inputs[2], inputs[3]] # RL state: CTE, yaw error
         total_velocity_errors+=inputs[-1]
         errors_velocity=[inputs[-1], inputs[-1]]
@@ -489,30 +490,34 @@ def sac(episodes):
             time_previous=timenow
             episode_steps+=1 
             agent.iters=episode_steps
-            if i < 10: # To increase exploration
+            if episode_steps < 10: # To increase exploration
                 population_size=1
                 dim=3
                 for i in range(0, dim):
                     action[i] = random.uniform(low[i], high[i])  #action= P, I, D
-                    action[i]=[action[i]]
-                #action = env.action_space.sample() # to sample the random actions by randomly
+                      
             else:
-                action = agent.act(state) # to sample the actions by Gaussian 
+                action = agent.act(state_RL) # to sample the actions by Gaussian 
             
             it+=1
             state_control = model_control.kinematics(state_control, inputs, dt_sampling) #  state_control: x,y, yaw
             timenow=time.time()
             dt=timenow-time_previous # change in time
-            
-            inputs = controller.calculate_vel_steer(action, state_control,target_index,v, dt,errors_velocity,total_velocity_errors) #inputs: velocity, steering angle, CTE, yaw error, target index, current velocity error
-            state_RL_next=[inputs[2], inputs[3]] # RL state: CTE, yaw error
+            print('action', action)
+            inputs = controller.calculate_vel_steer(action,state_control,target_index, dt,errors_velocity,total_velocity_errors) #inputs: velocity, steering angle, CTE, yaw error, target index, current velocity error
+            state_RL_next=[inputs[2], inputs[3]] # state RL: CTE, yaw error
             reward, done=reward_calculate(state_RL_next)
+            print('state: ', state_RL_next, 'reward: ', reward)
+            total_velocity_errors+=inputs[-1]
+            errors_velocity[0]=errors_velocity[1]
+            errors_velocity[1]=inputs[-1]
             
-            
-            # next_state, reward, done, _ = env.step(action) % orj
+
+            if last_idx <= inputs[4]:
+                 done=True
             
              # Ignore the "done" signal if it comes from hitting the time horizon.
-            if episode_steps == env._max_episode_steps: # if the current episode has reached its maximum allowed steps
+            if episode_steps == max_episode_steps: # if the current episode has reached its maximum allowed steps
                 mask = 1
             else:
                 mask = float(not done)
@@ -521,12 +526,33 @@ def sac(episodes):
                 agent.step()
             
             
+
             total_reward += reward
-            state = next_state
+            state_RL=state_RL_next
+
+            state_hist.append(state_control)
+            inputs_hist.append(inputs) 
+
+
             print(f"episode: {i+1}, steps:{episode_steps}, current reward: {total_reward}")
-            agent.memory.push((state, action, reward, next_state, mask))
-            env.render()
-        
+            agent.memory.push((state_RL, action, reward, state_RL_next, mask))
+            #env.render()
+            
+            if animate:
+                x=[s[0] for s in state_hist]
+                y=[s[1] for s in state_hist]
+                plt.cla()
+                # for stopping simulation with the esc key.
+                plt.gcf().canvas.mpl_connect('key_release_event',
+                    lambda event: [exit(0) if event.key == 'escape' else None])
+                plt.plot(path_ref[:, 0], path_ref[:, 1], ".r", label="reference")
+                plt.plot(x, y, "-b", label="found traj")
+                plt.plot(path_ref[last_idx,0], path_ref[last_idx,1], "xg", label="target")
+                plt.axis("equal")
+                plt.grid(True)
+                plt.title("Speed[km/h]:" + str(inputs[0] * 3.6)[:4])
+                plt.pause(0.001)
+
         reward_list.append(total_reward)
         avg_score_deque.append(total_reward)
         mean = np.mean(avg_score_deque)
@@ -542,10 +568,6 @@ def sac(episodes):
 
 
 # Environment
-env = make("Pendulum-v0")
-np.random.seed(0)
-env.seed(0)
-
 action_size = 3 # P, I, D
 print(f'size of each action = {action_size}')
 state_size = 2 #  cte, yaw
@@ -556,6 +578,7 @@ print(f'low of each action = {low}')
 print(f'high of each action = {high}')
 
 
+max_episode_steps=1000 # if the agent does not reach "done" in "max_episode_steps", mask is 1
 batch_size=20 # size that will be sampled from the replay memory that has maximum of "memory_capacity"
 memory_capacity = 200 # 2000, maximum size of the memory
 gamma = 0.99            
