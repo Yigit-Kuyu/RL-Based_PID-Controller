@@ -270,8 +270,8 @@ class Sac_agent:
         self.learn(self.memory.sample())
         
     def save(self):
-        torch.save(self.actor.state_dict(), "pen_actor.pkl")
-        torch.save(self.critic.state_dict(), "pen_critic.pkl")
+        torch.save(self.actor.state_dict(), "path_track_RL_actor.pkl")
+        torch.save(self.critic.state_dict(), "path_track_RL_critic.pkl")
 
 
 class BicycleModel_Rear: # Rear axle model (Position of vehicle is defined as the position of the rear wheel)
@@ -434,6 +434,23 @@ def reward_calculate(state_input):
 
         return R, done
 
+
+def plot_trajectory(state, path_ref, L):
+    x=[s[0] for s in state]
+    y=[s[1] for s in state]
+    yaw=[s[2] for s in state]
+    fig, ax = plt.subplots(1, 1, figsize=(8, 8)) 
+    ax.plot(x, y, 'k', label="rear wheel")
+    ax.plot(x + L * np.cos(yaw), y + L * np.sin(yaw), 'k-.', label="front wheel")
+    ax.plot(path_ref[:, 0], path_ref[:, 1], 'r--', label="path ref")
+    ax.legend()
+    ax.axis('equal')
+    ax.grid()
+    ax.set_xlabel('x [m]')
+    ax.set_ylabel('y [m]')
+
+    return fig
+
 def sac(episodes):
     agent = Sac_agent(state_size = state_size, action_size = action_size, hidden_dim = hidden_dim, high = high, low = low, 
                   memory_capacity = memory_capacity, batch_size = batch_size, gamma = gamma, tau = tau, 
@@ -456,7 +473,7 @@ def sac(episodes):
     dt_sampling = 0.1  # sampling time
     for i in range(episodes):
         #state = env.reset() 
-        action=[1,1,1] # action    
+        action=[1,1,1] # action : [P, I, D]  
         model_control = BicycleModel_Rear(delta_max, wheelbase)
 
         controller = StanleyController(path_ref, v_ref, action)
@@ -465,7 +482,6 @@ def sac(episodes):
         dt=1  # For PID
         total_velocity_errors=0
         action=[1,1,1] # P, I, D
-        v=0
         target_index=0
         errors_velocity=[1e+1, 1e+1] # [previous velocity error, current velocity error]
         state_control = np.array([0, 0, np.radians(50)]) #state_control: x,y, yaw
@@ -486,7 +502,7 @@ def sac(episodes):
         done = False
         episode_steps = 0
         timenow=time.time()
-        while not done or last_idx <= inputs[2]:
+        while not done:
             time_previous=timenow
             episode_steps+=1 
             agent.iters=episode_steps
@@ -558,7 +574,7 @@ def sac(episodes):
         mean = np.mean(avg_score_deque)
         avg_scores_list.append(mean)
         
-    plt.plot(episode_steps,reward_list)
+    plt.plot(reward_list)
     agent.save()
     print(f"episode: {i+1}, steps:{episode_steps}, current reward: {total_reward}, max reward: {np.max(reward_list)}")
     
@@ -594,24 +610,85 @@ hidden_dim=256
 reward, avg_reward = sac(num_of_train_episodes)
 
 
+# Controller input
+path_ref = path_sin()
+v_ref = 30.0 / 3.6  # [m/s]
+wheelbase = 2
+delta_max = np.radians(30) # [rad] max steering angle
+dt_sampling = 0.1  # sampling time
 
 # Testing
-new_env = make("Pendulum-v0")
 best_actor = Actor(state_size, action_size, hidden_dim = hidden_dim, high = high, low = low)
-best_actor.load_state_dict(torch.load("pen_actor.pkl"))        
+best_actor.load_state_dict(torch.load("path_track_RL_actor.pkl"))        
 best_actor.to(device) 
 reward_test = []
 for i in range(num_of_test_episodes):
-    state = new_env.reset()
+    #state = new_env.reset()
+    action=[1,1,1] # action : [P, I, D]  
+    model_control = BicycleModel_Rear(delta_max, wheelbase)
+    controller = StanleyController(path_ref, v_ref, action)
+    dt=1  # For PID
+    total_velocity_errors=0
+    action=[1,1,1] # P, I, D
+    target_index=0
+    errors_velocity=[1e+1, 1e+1] # [previous velocity error, current velocity error]
+    state_control = np.array([0, 0, np.radians(50)]) #state_control: x,y, yaw
+    inputs = controller.calculate_vel_steer(action,state_control,target_index, dt,errors_velocity,total_velocity_errors) #inputs: velocity, steering angle, CTE, yaw error, target index, current velocity error
+    state_RL=[inputs[2], inputs[3]] # RL state: CTE, yaw error
+    total_velocity_errors+=inputs[-1]
+    errors_velocity=[inputs[-1], inputs[-1]]
+    
+    state_hist = []
+    inputs_hist = []
+    it=0
+    last_idx=len(path_ref)-1
+    
     local_reward = 0
     done = False
+    
+    total_reward = 0
+    done = False
+    episode_steps = 0
+    timenow=time.time()
+
     while not done:
-        state =  torch.tensor(state).to(device).float()
-        action,logp = best_actor(state)        
-        action = action.cpu().data.numpy()
-        state, r, done, _ = new_env.step(action)
-        local_reward += r
+        time_previous=timenow
+        episode_steps+=1 
+        print('test episonde:',i, 'test iteration: ', episode_steps)
+        state_RL =  torch.tensor(state_RL).unsqueeze(0).to(device).float()
+        action,_=best_actor.sample(state_RL)
+        mean,logp = best_actor(state_RL)        
+        mean = mean.cpu().data.numpy() 
+
+        it+=1
+        state_control = model_control.kinematics(state_control, inputs, dt_sampling) #  state_control: x,y, yaw
+        timenow=time.time()
+        dt=timenow-time_previous # change in time
+        print('action', action)
+        inputs = controller.calculate_vel_steer(action,state_control,target_index, dt,errors_velocity,total_velocity_errors) #inputs: velocity, steering angle, CTE, yaw error, target index, current velocity error
+        state_RL_next=[inputs[2], inputs[3]] # state RL: CTE, yaw error
+        reward, done=reward_calculate(state_RL_next)
+        print('state: ', state_RL_next, 'reward: ', reward)
+        total_velocity_errors+=inputs[-1]
+        errors_velocity[0]=errors_velocity[1]
+        errors_velocity[1]=inputs[-1]
+        if reward>reward_previous:
+            best_PID=action
+            best_reward=reward
+            reward_previous=reward
+        
+        local_reward += float(reward[0])
+        state_RL=state_RL_next
+        if episode_steps == max_episode_steps or last_idx <= inputs[4]: # if the current episode has reached its maximum allowed steps
+                done=True
+         
+        
+
     reward_test.append(local_reward)
+
+# Fİnal Plot icin kod ekle plot_trajectory(state, path_ref, L):
+
+
 
 
 import plotly.graph_objects as go
