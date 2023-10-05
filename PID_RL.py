@@ -656,7 +656,7 @@ for i in range(num_of_test_episodes):
         episode_steps+=1 
         print('test episonde:',i, 'test iteration: ', episode_steps)
         state_RL =  torch.tensor(state_RL).unsqueeze(0).to(device).float()
-        action,_=best_actor.sample(state_RL)
+        action,_=best_actor.sample(state_RL) # action: P, I, D
         mean,logp = best_actor(state_RL)        
         mean = mean.cpu().data.numpy() 
 
@@ -683,10 +683,12 @@ for i in range(num_of_test_episodes):
                 done=True
          
         
+        state_hist.append(state_control)
+        inputs_hist.append(inputs) 
 
     reward_test.append(local_reward)
+    plot_trajectory(state_hist, path_ref, wheelbase)
 
-# Fİnal Plot icin kod ekle plot_trajectory(state, path_ref, L):
 
 
 
