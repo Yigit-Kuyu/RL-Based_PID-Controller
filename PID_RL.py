@@ -270,8 +270,8 @@ class Sac_agent:
         self.learn(self.memory.sample())
         
     def save(self):
-        torch.save(self.actor.state_dict(), "pen_actor.pkl")
-        torch.save(self.critic.state_dict(), "pen_critic.pkl")
+        torch.save(self.actor.state_dict(), "path_track_RL_actor.pkl")
+        torch.save(self.critic.state_dict(), "path_track_RL_critic.pkl")
 
 
 class BicycleModel_Rear: # Rear axle model (Position of vehicle is defined as the position of the rear wheel)
@@ -434,6 +434,23 @@ def reward_calculate(state_input):
 
         return R, done
 
+
+def plot_trajectory(state, path_ref, L):
+    x=[s[0] for s in state]
+    y=[s[1] for s in state]
+    yaw=[s[2] for s in state]
+    fig, ax = plt.subplots(1, 1, figsize=(8, 8)) 
+    ax.plot(x, y, 'k', label="rear wheel")
+    ax.plot(x + L * np.cos(yaw), y + L * np.sin(yaw), 'k-.', label="front wheel")
+    ax.plot(path_ref[:, 0], path_ref[:, 1], 'r--', label="path ref")
+    ax.legend()
+    ax.axis('equal')
+    ax.grid()
+    ax.set_xlabel('x [m]')
+    ax.set_ylabel('y [m]')
+
+    return fig
+
 def sac(episodes):
     agent = Sac_agent(state_size = state_size, action_size = action_size, hidden_dim = hidden_dim, high = high, low = low, 
                   memory_capacity = memory_capacity, batch_size = batch_size, gamma = gamma, tau = tau, 
@@ -558,7 +575,7 @@ def sac(episodes):
         mean = np.mean(avg_score_deque)
         avg_scores_list.append(mean)
         
-    plt.plot(episode_steps,reward_list)
+    plt.plot(reward_list)
     agent.save()
     print(f"episode: {i+1}, steps:{episode_steps}, current reward: {total_reward}, max reward: {np.max(reward_list)}")
     
@@ -594,11 +611,9 @@ hidden_dim=256
 reward, avg_reward = sac(num_of_train_episodes)
 
 
-
 # Testing
-new_env = make("Pendulum-v0")
 best_actor = Actor(state_size, action_size, hidden_dim = hidden_dim, high = high, low = low)
-best_actor.load_state_dict(torch.load("pen_actor.pkl"))        
+best_actor.load_state_dict(torch.load("path_track_RL_actor.pkl"))        
 best_actor.to(device) 
 reward_test = []
 for i in range(num_of_test_episodes):
@@ -612,6 +627,10 @@ for i in range(num_of_test_episodes):
         state, r, done, _ = new_env.step(action)
         local_reward += r
     reward_test.append(local_reward)
+
+# Fİnal Plot icin kod ekle plot_trajectory(state, path_ref, L):
+
+
 
 
 import plotly.graph_objects as go
