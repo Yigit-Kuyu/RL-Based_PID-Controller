@@ -594,12 +594,12 @@ print(f'low of each action = {low}')
 print(f'high of each action = {high}')
 
 
-max_episode_steps=1000 # if the agent does not reach "done" in "max_episode_steps", mask is 1
+max_episode_steps=2 # if the agent does not reach "done" in "max_episode_steps", mask is 1, 1000
 batch_size=20 # size that will be sampled from the replay memory that has maximum of "memory_capacity"
 memory_capacity = 200 # 2000, maximum size of the memory
 gamma = 0.99            
 tau = 0.005               
-num_of_train_episodes = 1500
+num_of_train_episodes = 3 #1500
 num_updates = 1 # how many times you want to update the networks in each episode
 policy_freq= 2 # lower value more probability to soft update,  policy frequency for soft update of the target network borrowed by TD3 algorithm
 entropy_coef = 0.2 # For entropy regularization
@@ -627,9 +627,9 @@ for i in range(num_of_test_episodes):
     action=[1,1,1] # action : [P, I, D]  
     model_control = BicycleModel_Rear(delta_max, wheelbase)
     controller = StanleyController(path_ref, v_ref, action)
+    
     dt=1  # For PID
     total_velocity_errors=0
-    action=[1,1,1] # P, I, D
     target_index=0
     errors_velocity=[1e+1, 1e+1] # [previous velocity error, current velocity error]
     state_control = np.array([0, 0, np.radians(50)]) #state_control: x,y, yaw
@@ -645,20 +645,20 @@ for i in range(num_of_test_episodes):
     
     local_reward = 0
     done = False
-    
-    total_reward = 0
-    done = False
     episode_steps = 0
+    reward_previous=-1000
     timenow=time.time()
 
     while not done:
         time_previous=timenow
         episode_steps+=1 
         print('test episonde:',i, 'test iteration: ', episode_steps)
+        
         state_RL =  torch.tensor(state_RL).unsqueeze(0).to(device).float()
         action,_=best_actor.sample(state_RL) # action: P, I, D
         mean,logp = best_actor(state_RL)        
         mean = mean.cpu().data.numpy() 
+        action = action.cpu().data.numpy()[0]
 
         it+=1
         state_control = model_control.kinematics(state_control, inputs, dt_sampling) #  state_control: x,y, yaw
@@ -677,7 +677,7 @@ for i in range(num_of_test_episodes):
             best_reward=reward
             reward_previous=reward
         
-        local_reward += float(reward[0])
+        local_reward += float(reward)
         state_RL=state_RL_next
         if episode_steps == max_episode_steps or last_idx <= inputs[4]: # if the current episode has reached its maximum allowed steps
                 done=True
