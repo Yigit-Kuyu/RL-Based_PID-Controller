@@ -594,16 +594,16 @@ print(f'low of each action = {low}')
 print(f'high of each action = {high}')
 
 
-max_episode_steps=2 # if the agent does not reach "done" in "max_episode_steps", mask is 1, 1000
+max_episode_steps=1000 # if the agent does not reach "done" in "max_episode_steps", mask is 1
 batch_size=20 # size that will be sampled from the replay memory that has maximum of "memory_capacity"
 memory_capacity = 200 # 2000, maximum size of the memory
 gamma = 0.99            
 tau = 0.005               
-num_of_train_episodes = 3 #1500
+num_of_train_episodes = 150
 num_updates = 1 # how many times you want to update the networks in each episode
 policy_freq= 2 # lower value more probability to soft update,  policy frequency for soft update of the target network borrowed by TD3 algorithm
 entropy_coef = 0.2 # For entropy regularization
-num_of_test_episodes=200
+num_of_test_episodes=50
 hidden_dim=256
 
 # Traning agent
@@ -617,11 +617,17 @@ wheelbase = 2
 delta_max = np.radians(30) # [rad] max steering angle
 dt_sampling = 0.1  # sampling time
 
+
+
 # Testing
 best_actor = Actor(state_size, action_size, hidden_dim = hidden_dim, high = high, low = low)
 best_actor.load_state_dict(torch.load("path_track_RL_actor.pkl"))        
 best_actor.to(device) 
+
 reward_test = []
+best_state_control=[]
+best_action_list = []
+best_reward_list=[]
 for i in range(num_of_test_episodes):
     #state = new_env.reset()
     action=[1,1,1] # action : [P, I, D]  
@@ -638,6 +644,7 @@ for i in range(num_of_test_episodes):
     total_velocity_errors+=inputs[-1]
     errors_velocity=[inputs[-1], inputs[-1]]
     
+   
     state_hist = []
     inputs_hist = []
     it=0
@@ -648,7 +655,7 @@ for i in range(num_of_test_episodes):
     episode_steps = 0
     reward_previous=-1000
     timenow=time.time()
-
+    
     while not done:
         time_previous=timenow
         episode_steps+=1 
@@ -676,6 +683,7 @@ for i in range(num_of_test_episodes):
             best_PID=action
             best_reward=reward
             reward_previous=reward
+            
         
         local_reward += float(reward)
         state_RL=state_RL_next
@@ -686,30 +694,17 @@ for i in range(num_of_test_episodes):
         state_hist.append(state_control)
         inputs_hist.append(inputs) 
 
-    reward_test.append(local_reward)
-    plot_trajectory(state_hist, path_ref, wheelbase)
-
-
-
-
-
-import plotly.graph_objects as go
-x = np.array(range(len(reward_test)))
-m = np.mean(reward_test)
-
-
-fig = go.Figure()
-fig.add_trace(go.Scatter(x=x, y=reward_test, name='test reward',
-                                 line=dict(color="green", width=1)))
-
-fig.add_trace(go.Scatter(x=x, y=[m]*len(reward_test), name='average reward',
-                                 line=dict(color="red", width=1)))
     
-fig.update_layout(title="SAC",
-                           xaxis_title= "test",
-                           yaxis_title= "reward")
-fig.show()
+    reward_test.append(local_reward)
+    best_action_list.append(best_PID)
+    best_reward_list.append(best_reward)
+    best_state_control.append(state_hist)
 
-print("average reward:", m)
+
+best_index=reward_test.index(max(reward_test))
+optimal_PID=best_action_list[best_index]
+best_state=best_state_control[best_index]
+plot_trajectory(best_state, path_ref, wheelbase)
+print('stop')
 
 
