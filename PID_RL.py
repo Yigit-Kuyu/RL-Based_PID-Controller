@@ -448,6 +448,7 @@ def plot_trajectory(state, path_ref, L):
     ax.grid()
     ax.set_xlabel('x [m]')
     ax.set_ylabel('y [m]')
+    plt.show()
 
     return fig
 
